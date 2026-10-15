@@ -8,9 +8,9 @@ on:
         type: boolean
         default: true
       ksu_branch:
-        description: Rama de KernelSU Next (stable, dev o legacy)
+        description: Rama de KernelSU Next (vacio = rama por defecto del repo)
         type: string
-        default: stable
+        default: ""
       user_ns:
         description: Incluir User Namespaces para Droidspaces
         type: boolean
@@ -41,8 +41,18 @@ jobs:
         env:
           KSU_BRANCH: ${{ inputs.ksu_branch }}
         run: |
-          git ls-remote --exit-code --heads https://github.com/KernelSU-Next/KernelSU-Next "$KSU_BRANCH" > /dev/null || { echo "La rama $KSU_BRANCH no existe"; exit 1; }
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/$KSU_BRANCH/kernel/setup.sh" | bash -s "$KSU_BRANCH"
+          URL=https://github.com/KernelSU-Next/KernelSU-Next
+          BR="$KSU_BRANCH"
+          if [ -z "$BR" ]; then
+            BR=$(git ls-remote --symref "$URL" HEAD | awk '/^ref:/ {sub("refs/heads/","",$2); print $2}')
+          fi
+          echo "Rama de KernelSU Next: $BR"
+          if ! git ls-remote --exit-code --heads "$URL" "$BR" > /dev/null; then
+            echo "La rama $BR no existe. Ramas disponibles:"
+            git ls-remote --heads "$URL" | awk '{print $2}'
+            exit 1
+          fi
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/$BR/kernel/setup.sh" | bash -s "$BR"
           D=arch/arm64/configs/dragonheart_defconfig
           sed -i -E '/^(# )?CONFIG_(KSU|KPROBES|HAVE_KPROBES|KPROBE_EVENTS)( is not set|=.*)$/d' "$D"
           printf '\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\n' >> "$D"
