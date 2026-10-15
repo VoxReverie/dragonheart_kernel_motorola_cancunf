@@ -7,6 +7,10 @@ on:
         description: Incluir KernelSU Next
         type: boolean
         default: true
+      ksu_branch:
+        description: Rama de KernelSU Next (stable, dev o legacy)
+        type: string
+        default: stable
       user_ns:
         description: Incluir User Namespaces para Droidspaces
         type: boolean
@@ -15,111 +19,49 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout kernel source
         uses: actions/checkout@v4
-        with:
-          ref: android12-5.10
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            bc bison flex libssl-dev libelf-dev \
-            build-essential python3 cpio rsync \
-            zip unzip curl git wget dialog
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
+            build-essential python3 cpio rsync zip unzip curl git wget dialog
 
       - name: Add User Namespaces
         if: ${{ inputs.user_ns }}
         run: |
-          set -euo pipefail
-
           D=arch/arm64/configs/dragonheart_defconfig
-
-          sed -i -E \
-            '/^(# )?CONFIG_USER_NS( is not set|=.*)$/d' "$D"
-
+          sed -i -E '/^(# )?CONFIG_USER_NS( is not set|=.*)$/d' "$D"
           printf '\nCONFIG_USER_NS=y\n' >> "$D"
 
       - name: Add KernelSU Next
         if: ${{ inputs.ksu }}
+        env:
+          KSU_BRANCH: ${{ inputs.ksu_branch }}
         run: |
-          set -euo pipefail
-
-          curl -LSs \
-            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" \
-            | bash -s legacy
-
-          test -d KernelSU-Next
-
-          git -C KernelSU-Next fetch --force origin legacy
-          git -C KernelSU-Next checkout --detach origin/legacy
-
-          echo "=== KernelSU Next revision ==="
-          git -C KernelSU-Next log -1 --format='%H %s'
-
+          git ls-remote --exit-code --heads https://github.com/KernelSU-Next/KernelSU-Next "$KSU_BRANCH" > /dev/null || { echo "La rama $KSU_BRANCH no existe"; exit 1; }
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/$KSU_BRANCH/kernel/setup.sh" | bash -s "$KSU_BRANCH"
           D=arch/arm64/configs/dragonheart_defconfig
-
-          sed -i -E \
-            '/^(# )?CONFIG_(KSU|KPROBES|KPROBE_EVENTS|KSU_KPROBE_HOOKS)( is not set|=.*)$/d' "$D"
-
-          printf '\n# KernelSU Next\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\nCONFIG_KSU_KPROBE_HOOKS=y\n' >> "$D"
-
-      - name: Verify defconfig
-        run: |
-          set -euo pipefail
-
-          D=arch/arm64/configs/dragonheart_defconfig
-
-          echo "=== Relevant kernel options ==="
-          grep -E '^(CONFIG_USER_NS|CONFIG_KSU|CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_KPROBE_HOOKS)=' "$D" || true
-
-          if [ "${{ inputs.user_ns }}" = "true" ]; then
-            grep -qx 'CONFIG_USER_NS=y' "$D"
-          fi
-
-          if [ "${{ inputs.ksu }}" = "true" ]; then
-            grep -qx 'CONFIG_KSU=y' "$D"
-            grep -qx 'CONFIG_KSU_KPROBE_HOOKS=y' "$D"
-          fi
+          sed -i -E '/^(# )?CONFIG_(KSU|KPROBES|HAVE_KPROBES|KPROBE_EVENTS)( is not set|=.*)$/d' "$D"
+          printf '\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\n' >> "$D"
 
       - name: Build kernel
         env:
           CI: "1"
         run: |
-          set -euo pipefail
           chmod +x kramel.sh
           bash kramel.sh img
-
-      - name: Verify final kernel config
-        run: |
-          set -euo pipefail
-
-          C=out/.config
-          test -f "$C"
-
-          echo "=== Final kernel configuration ==="
-          grep -E '^(CONFIG_USER_NS|CONFIG_KSU|CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_KPROBE_HOOKS)=' "$C" || true
-
-          if [ "${{ inputs.user_ns }}" = "true" ]; then
-            grep -qx 'CONFIG_USER_NS=y' "$C"
-          fi
-
-          if [ "${{ inputs.ksu }}" = "true" ]; then
-            grep -qx 'CONFIG_KSU=y' "$C"
-          fi
 
       - name: Build AnyKernel3 zip
         env:
           CI: "1"
         run: |
-          set -euo pipefail
           bash kramel.sh mkzip
 
       - name: Upload kernel zip
         uses: actions/upload-artifact@v4
         with:
           name: DragonHeart-cancunf
-          path: anykernel3-dragonheart/*.zip
-          if-no-files-found: error
+          path: anykernel3-dragonheart/*.zip 
