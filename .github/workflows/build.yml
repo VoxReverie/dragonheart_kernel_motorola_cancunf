@@ -59,6 +59,51 @@ jobs:
           echo "=== KernelSU Next revision ==="
           git -C KernelSU-Next log -1 --format='%H %s'
 
+      - name: Patch KernelSU Next SELinux compatibility
+        if: ${{ inputs.ksu }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          rules = Path("drivers/kernelsu/selinux/rules.c")
+          header = Path("drivers/kernelsu/selinux/sepolicy.h")
+          if not rules.is_file() or not header.is_file():
+              raise SystemExit("KernelSU Next SELinux source files were not found after setup")
+
+          source = rules.read_text()
+          old = "u32 seqno = selinux_state.ss ? ++selinux_state.ss->latest_granting : 1;"
+          new = """#ifdef SELINUX_POLICY_INSTEAD_SELINUX_SS
+          \tstruct selinux_policy *policy = rcu_dereference_protected(
+          \t\tselinux_state.policy,
+          \t\tlockdep_is_held(&selinux_state.policy_mutex));
+          \tu32 seqno = policy ? ++policy->latest_granting : 1;
+          #else
+          \tu32 seqno = selinux_state.ss ? ++selinux_state.ss->latest_granting : 1;
+          #endif"""
+          if old in source:
+              if source.count(old) != 1:
+                  raise SystemExit("Unexpected number of SELinux sequence-number lines in rules.c")
+              rules.write_text(source.replace(old, new, 1))
+          elif "u32 seqno = policy ? ++policy->latest_granting : 1;" not in source:
+              raise SystemExit("Could not locate expected reset_avc_cache() line in rules.c")
+
+          source = header.read_text()
+          declarations = """struct selinux_policy;
+          struct selinux_policy *ksu_dup_sepolicy(struct selinux_policy *old_pol);
+          void ksu_destroy_sepolicy(struct selinux_policy *pol);
+          """
+          if "ksu_dup_sepolicy(struct selinux_policy *old_pol);" not in source:
+              include = '#include "ss/policydb.h"'
+              if source.count(include) != 1:
+                  raise SystemExit("Could not locate expected include in sepolicy.h")
+              source = source.replace(include, include + "\\n\\n" + declarations, 1)
+              header.write_text(source)
+
+          print("Applied KernelSU Next SELinux compatibility patch.")
+          PY
+
           D=arch/arm64/configs/dragonheart_defconfig
 
           sed -i -E \
