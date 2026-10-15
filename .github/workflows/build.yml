@@ -2,6 +2,19 @@ name: Build DragonHeart Kernel
 
 on:
   workflow_dispatch:
+    inputs:
+      ksu:
+        description: Incluir KernelSU
+        type: boolean
+        default: true
+      user_ns:
+        description: Incluir User Namespaces para Droidspaces
+        type: boolean
+        default: true
+      ksu_tag:
+        description: Tag de KernelSU (vacio = ultima version)
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -15,6 +28,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
             build-essential python3 cpio rsync zip unzip curl git wget dialog
+
+      - name: Add User Namespaces
+        if: ${{ inputs.user_ns }}
+        run: |
+          D=arch/arm64/configs/dragonheart_defconfig
+          sed -i -E '/^(# )?CONFIG_USER_NS( is not set|=.*)$/d' "$D"
+          printf '\nCONFIG_USER_NS=y\n' >> "$D"
+
+      - name: Add KernelSU
+        if: ${{ inputs.ksu }}
+        env:
+          KSU_TAG: ${{ inputs.ksu_tag }}
+        run: |
+          if [ -n "$KSU_TAG" ]; then
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "$KSU_TAG"
+          else
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          fi
+          D=arch/arm64/configs/dragonheart_defconfig
+          sed -i -E '/^(# )?CONFIG_(KSU|KPROBES|HAVE_KPROBES|KPROBE_EVENTS)( is not set|=.*)$/d' "$D"
+          printf '\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\n' >> "$D"
 
       - name: Build kernel
         env:
