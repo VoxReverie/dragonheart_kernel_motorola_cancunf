@@ -1,4 +1,3 @@
-
 name: Build DragonHeart Kernel
 
 on:
@@ -20,6 +19,8 @@ jobs:
     steps:
       - name: Checkout kernel source
         uses: actions/checkout@v4
+        with:
+          ref: android12-5.10
 
       - name: Install build dependencies
         run: |
@@ -32,6 +33,8 @@ jobs:
       - name: Add User Namespaces
         if: ${{ inputs.user_ns }}
         run: |
+          set -euo pipefail
+
           D=arch/arm64/configs/dragonheart_defconfig
 
           sed -i -E \
@@ -42,11 +45,19 @@ jobs:
       - name: Add KernelSU Next
         if: ${{ inputs.ksu }}
         run: |
-          set -e
+          set -euo pipefail
 
           curl -LSs \
             "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" \
             | bash -s legacy
+
+          test -d KernelSU-Next
+
+          git -C KernelSU-Next fetch --force origin legacy
+          git -C KernelSU-Next checkout --detach origin/legacy
+
+          echo "=== KernelSU Next revision ==="
+          git -C KernelSU-Next log -1 --format='%H %s'
 
           D=arch/arm64/configs/dragonheart_defconfig
 
@@ -55,13 +66,13 @@ jobs:
 
           printf '\n# KernelSU Next\nCONFIG_KSU=y\nCONFIG_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\nCONFIG_KSU_KPROBE_HOOKS=y\n' >> "$D"
 
-      - name: Verify kernel configuration
+      - name: Verify defconfig
         run: |
-          set -e
+          set -euo pipefail
 
           D=arch/arm64/configs/dragonheart_defconfig
 
-          echo "=== KernelSU Next / User Namespaces ==="
+          echo "=== Relevant kernel options ==="
           grep -E '^(CONFIG_USER_NS|CONFIG_KSU|CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_KPROBE_HOOKS)=' "$D" || true
 
           if [ "${{ inputs.user_ns }}" = "true" ]; then
@@ -77,13 +88,33 @@ jobs:
         env:
           CI: "1"
         run: |
+          set -euo pipefail
           chmod +x kramel.sh
           bash kramel.sh img
+
+      - name: Verify final kernel config
+        run: |
+          set -euo pipefail
+
+          C=out/.config
+          test -f "$C"
+
+          echo "=== Final kernel configuration ==="
+          grep -E '^(CONFIG_USER_NS|CONFIG_KSU|CONFIG_KPROBES|CONFIG_KPROBE_EVENTS|CONFIG_KSU_KPROBE_HOOKS)=' "$C" || true
+
+          if [ "${{ inputs.user_ns }}" = "true" ]; then
+            grep -qx 'CONFIG_USER_NS=y' "$C"
+          fi
+
+          if [ "${{ inputs.ksu }}" = "true" ]; then
+            grep -qx 'CONFIG_KSU=y' "$C"
+          fi
 
       - name: Build AnyKernel3 zip
         env:
           CI: "1"
         run: |
+          set -euo pipefail
           bash kramel.sh mkzip
 
       - name: Upload kernel zip
@@ -92,4 +123,3 @@ jobs:
           name: DragonHeart-cancunf
           path: anykernel3-dragonheart/*.zip
           if-no-files-found: error
-          
