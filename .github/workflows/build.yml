@@ -98,7 +98,7 @@ jobs:
               include = '#include "ss/policydb.h"'
               if source.count(include) != 1:
                   raise SystemExit("Could not locate expected include in sepolicy.h")
-              source = source.replace(include, include + "\\n\\n" + declarations, 1)
+              source = source.replace(include, include + "\n\n" + declarations, 1)
               header.write_text(source)
 
           print("Applied KernelSU Next SELinux compatibility patch.")
