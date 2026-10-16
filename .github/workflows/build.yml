@@ -15,6 +15,14 @@ on:
         description: Incluir User Namespaces para Droidspaces
         type: boolean
         default: true
+      extras_net:
+        description: Macvlan e IPv6 NAT
+        type: boolean
+        default: false
+      extras_cgroup:
+        description: Limite de CPU y de procesos
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -35,6 +43,20 @@ jobs:
           D=arch/arm64/configs/dragonheart_defconfig
           sed -i -E '/^(# )?CONFIG_USER_NS( is not set|=.*)$/d' "$D"
           printf '\nCONFIG_USER_NS=y\n' >> "$D"
+
+      - name: Add Droidspaces network extras
+        if: ${{ inputs.extras_net }}
+        run: |
+          D=arch/arm64/configs/dragonheart_defconfig
+          sed -i -E '/^(# )?CONFIG_(MACVLAN|IP6_NF_IPTABLES|IP6_NF_NAT|IP6_NF_TARGET_MASQUERADE)( is not set|=.*)$/d' "$D"
+          printf '\nCONFIG_MACVLAN=y\nCONFIG_IP6_NF_IPTABLES=y\nCONFIG_IP6_NF_NAT=y\nCONFIG_IP6_NF_TARGET_MASQUERADE=y\n' >> "$D"
+
+      - name: Add Droidspaces cgroup extras
+        if: ${{ inputs.extras_cgroup }}
+        run: |
+          D=arch/arm64/configs/dragonheart_defconfig
+          sed -i -E '/^(# )?CONFIG_(CGROUP_PIDS|CFS_BANDWIDTH|CGROUP_SCHED|FAIR_GROUP_SCHED)( is not set|=.*)$/d' "$D"
+          printf '\nCONFIG_CGROUP_SCHED=y\nCONFIG_FAIR_GROUP_SCHED=y\nCONFIG_CFS_BANDWIDTH=y\nCONFIG_CGROUP_PIDS=y\n' >> "$D"
 
       - name: Add KernelSU Next
         if: ${{ inputs.ksu }}
@@ -74,4 +96,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DragonHeart-cancunf
-          path: anykernel3-dragonheart/*.zip 
+          path: anykernel3-dragonheart/*.zip
